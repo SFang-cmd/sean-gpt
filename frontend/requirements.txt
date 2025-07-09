@@ -1,0 +1,12 @@
+streamlit
+requests
+python-dotenv
+langchain
+langchain-openai
+langchain-community
+chromadb
+openai
+PyYAML
+gitpython
+markdown
+tiktoken

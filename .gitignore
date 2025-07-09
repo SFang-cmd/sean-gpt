@@ -1,0 +1,40 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables
+.env
+
+# ChromaDB data
+backend/data/chroma_db/
+backend/data/chroma_db_test/
+frontend/data/chroma_db/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude files
+.claude/
+CLAUDE.local.md
+
+# Temporary files
+*.tmp
+*.temp

@@ -48,7 +48,8 @@ def launch_streamlit():
     """Launch the Streamlit application"""
     frontend_path = Path(__file__).parent / "frontend"
     venv_python = frontend_path / ".venv" / "bin" / "python"
-    streamlit_script = frontend_path / "streamlit_app.py"
+    # Use the simplified app
+    streamlit_script = Path(__file__).parent / "streamlit_app_simple.py"
     
     if not venv_python.exists():
         print("❌ Frontend virtual environment not found")

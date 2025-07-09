@@ -100,19 +100,50 @@ class ObsidianLoader:
         links = re.findall(r'\[\[([^\]]+)\]\]', content)
         return links
 
-def clone_or_update_repo(repo_url: str, local_path: str) -> str:
+# Hard-coded repository configuration
+DEFAULT_REPO_URL = "https://github.com/SFang-cmd/obiKnowledge"
+DEFAULT_REPO_NAME = "obiKnowledge"
+
+def clone_or_update_repo(repo_url: str = None, local_path: str = None, repo_name: str = None) -> str:
     """Clone repository or update if it exists"""
+    # Use defaults if not provided
+    if repo_url is None:
+        repo_url = DEFAULT_REPO_URL
+    if repo_name is None:
+        repo_name = DEFAULT_REPO_NAME
+    if local_path is None:
+        # Create default path relative to this file
+        backend_path = Path(__file__).parent.parent.parent
+        local_path = str(backend_path / "data" / repo_name)
+    
     if os.path.exists(local_path):
         # Update existing repo
-        repo = git.Repo(local_path)
-        repo.remotes.origin.pull()
-        print(f"Updated repository at {local_path}")
+        try:
+            repo = git.Repo(local_path)
+            repo.remotes.origin.pull()
+            print(f"✅ Updated repository at {local_path}")
+        except Exception as e:
+            print(f"❌ Failed to update repo: {e}")
+            return None
     else:
         # Clone new repo
-        git.Repo.clone_from(repo_url, local_path)
-        print(f"Cloned repository to {local_path}")
+        try:
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            git.Repo.clone_from(repo_url, local_path)
+            print(f"✅ Cloned repository to {local_path}")
+        except Exception as e:
+            print(f"❌ Failed to clone repo: {e}")
+            return None
     
     return local_path
+
+def load_default_knowledge_base():
+    """Load the default hard-coded knowledge base"""
+    repo_path = clone_or_update_repo()
+    if repo_path:
+        loader = ObsidianLoader(repo_path)
+        return loader.load_documents()
+    return []
 
 # Example usage
 if __name__ == "__main__":

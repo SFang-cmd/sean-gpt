@@ -1,4 +1,0 @@
-streamlit==1.41.0
-requests==2.32.4
-gunicorn==20.1.0
-flask==2.3.3

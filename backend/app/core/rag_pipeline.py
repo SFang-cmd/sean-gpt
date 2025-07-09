@@ -6,7 +6,7 @@ from langchain_openai import OpenAIEmbeddings, OpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
-from ..services.obsidian_loader import ObsidianLoader, ObsidianDocument
+from ..services.obsidian_loader import ObsidianLoader, ObsidianDocument, clone_or_update_repo, load_default_knowledge_base
 from ..services.text_splitter import MarkdownTextSplitter, DocumentChunk
 
 @dataclass
@@ -292,6 +292,32 @@ Content: {content}
                 print(f"✅ Cleared {len(results['ids'])} existing chunks from database")
         except Exception as e:
             print(f"Error clearing collection: {e}")
+    
+    def load_and_ingest_default_repo(self) -> Dict[str, int]:
+        """Convenience method to load and ingest the hard-coded repository"""
+        print("🔄 Loading default knowledge base repository...")
+        
+        # Clone or update the default repository
+        repo_path = clone_or_update_repo()
+        if not repo_path:
+            raise Exception("Failed to clone/update default repository")
+        
+        # Ingest the documents
+        print(f"📚 Ingesting documents from {repo_path}")
+        return self.ingest_documents(repo_path)
+    
+    def setup_knowledge_base(self, force_reload: bool = False) -> Dict[str, int]:
+        """Set up the knowledge base with the default repository"""
+        if self.has_existing_data() and not force_reload:
+            stats = self.get_collection_stats()
+            print(f"✅ Knowledge base already loaded with {stats['total_chunks']} chunks")
+            return {"documents_processed": 0, "chunks_created": 0, "embeddings_stored": stats['total_chunks']}
+        
+        if force_reload:
+            print("🗑️ Force reload requested - clearing existing data...")
+            self.clear_collection()
+        
+        return self.load_and_ingest_default_repo()
 
 # Example usage
 if __name__ == "__main__":

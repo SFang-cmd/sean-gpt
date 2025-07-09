@@ -8,10 +8,15 @@ from typing import List, Dict, Any
 
 # Add backend path to sys.path
 backend_path = Path(__file__).parent.parent / "backend"
-sys.path.append(str(backend_path))
+sys.path.insert(0, str(backend_path))
 
-from backend.app.core.rag_pipeline import RAGPipeline
-from backend.app.services.obsidian_loader import ObsidianLoader
+try:
+    from app.core.rag_pipeline import RAGPipeline
+    from app.services.obsidian_loader import ObsidianLoader
+    BACKEND_AVAILABLE = True
+except ImportError as e:
+    st.error(f"Backend import error: {e}")
+    BACKEND_AVAILABLE = False
 import tempfile
 import zipfile
 
@@ -71,27 +76,106 @@ if 'knowledge_base_loaded' not in st.session_state:
     st.session_state.knowledge_base_loaded = False
 
 def initialize_pipeline():
-    """Initialize the RAG pipeline"""
+    """Initialize the RAG pipeline with production-ready error handling"""
+    if not BACKEND_AVAILABLE:
+        st.error("Backend is not available. Please check your installation.")
+        return None
+        
     try:
         # Get OpenAI API key from environment or user input
         openai_key = os.getenv("OPENAI_API_KEY")
         
         if not openai_key:
-            st.error("Please set your OPENAI_API_KEY in the environment variables or .env file")
-            st.info("Create a .env file in the backend directory with: OPENAI_API_KEY=your_key_here")
+            st.error("❌ OpenAI API key not found")
+            st.info("💡 Set OPENAI_API_KEY environment variable or create .env file")
+            with st.expander("🔧 Setup Instructions"):
+                st.code("""
+# Option 1: Environment variable
+export OPENAI_API_KEY=sk-your-key-here
+
+# Option 2: Create .env file in backend directory
+echo "OPENAI_API_KEY=sk-your-key-here" > backend/.env
+                """)
             return None
         
-        pipeline = RAGPipeline(
-            openai_api_key=openai_key,
-            chroma_persist_directory="../backend/data/chroma_db",
-            chunk_size=1000,
-            chunk_overlap=200
-        )
+        # Validate API key format
+        if not openai_key.startswith('sk-'):
+            st.error("❌ Invalid OpenAI API key format (should start with 'sk-')")
+            return None
+        
+        # Test API key validity
+        with st.spinner("🔑 Validating API key..."):
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=openai_key)
+                # Quick test call
+                client.models.list()
+                st.success("✅ API key validated")
+            except Exception as api_error:
+                st.error(f"❌ API key validation failed: {str(api_error)}")
+                return None
+        
+        # Initialize pipeline with error handling
+        with st.spinner("🔧 Initializing RAG pipeline..."):
+            pipeline = RAGPipeline(
+                openai_api_key=openai_key,
+                chroma_persist_directory=str(backend_path / "data" / "chroma_db"),
+                chunk_size=1000,
+                chunk_overlap=200
+            )
         
         return pipeline
-    except Exception as e:
-        st.error(f"Error initializing pipeline: {str(e)}")
+    except ImportError as e:
+        st.error(f"❌ Missing dependencies: {str(e)}")
+        st.info("💡 Run: pip install openai")
         return None
+    except Exception as e:
+        st.error(f"❌ Pipeline initialization failed: {str(e)}")
+        st.info("💡 Check logs for details")
+        return None
+
+def load_from_github(repo_url: str):
+    """Load knowledge base from GitHub repository"""
+    if st.session_state.pipeline is None:
+        st.error("Pipeline not initialized")
+        return
+    
+    try:
+        # Check if we should clear existing data first
+        if st.session_state.pipeline.has_existing_data():
+            st.warning("⚠️ Existing data found in database. This will add to existing data.")
+            if st.button("Clear existing data first?"):
+                st.session_state.pipeline.clear_collection()
+                st.rerun()
+                return
+        
+        with st.spinner("Cloning/updating repository from GitHub..."):
+            # Use the obsidian loader's GitHub functionality
+            from app.services.obsidian_loader import clone_or_update_repo
+            
+            # Clone to backend data directory
+            local_repo_path = backend_path / "data" / "github_vault"
+            
+            # Clone or update repository
+            st.info("📥 Downloading repository...")
+            clone_or_update_repo(repo_url, str(local_repo_path))
+            
+        # Show progress for document processing
+        progress_container = st.empty()
+        with progress_container:
+            with st.spinner("🔄 Processing documents and generating embeddings..."):
+                st.info("This may take several minutes for large repositories...")
+                
+                # Ingest documents from the cloned repository
+                stats = st.session_state.pipeline.ingest_documents(str(local_repo_path))
+            
+        st.session_state.knowledge_base_loaded = True
+        st.success(f"✅ Successfully loaded from GitHub!")
+        st.info(f"📊 Processed {stats['documents_processed']} documents into {stats['chunks_created']} chunks")
+            
+    except Exception as e:
+        st.error(f"Error loading from GitHub: {str(e)}")
+        st.error("Make sure the repository URL is correct and accessible")
 
 def load_sample_data():
     """Load sample data for demo"""
@@ -102,7 +186,7 @@ def load_sample_data():
     try:
         with st.spinner("Loading sample knowledge base..."):
             # Create sample notes (same as in test_rag.py)
-            sample_dir = Path("../backend/data/obsidian-notes")
+            sample_dir = backend_path / "data" / "obsidian-notes"
             sample_dir.mkdir(parents=True, exist_ok=True)
             
             # Sample note 1: Machine Learning
@@ -299,34 +383,75 @@ def main():
     with st.sidebar:
         st.header("⚙️ Setup")
         
+        # Backend status
+        if BACKEND_AVAILABLE:
+            st.success("✅ Backend available")
+        else:
+            st.error("❌ Backend not available")
+            st.stop()
+        
         # Initialize pipeline
         if st.button("Initialize Pipeline"):
             st.session_state.pipeline = initialize_pipeline()
             if st.session_state.pipeline:
                 st.success("✅ Pipeline initialized!")
+                st.rerun()
         
         # Load sample data
         if st.session_state.pipeline and st.button("Load Sample Knowledge Base"):
             load_sample_data()
+            st.rerun()
+        
+        # GitHub repository integration
+        st.subheader("📂 GitHub Integration")
+        if st.session_state.pipeline:
+            github_url = st.text_input(
+                "GitHub Repository URL:",
+                placeholder="https://github.com/username/repo",
+                help="Enter the URL of your Obsidian vault repository"
+            )
+            
+            if st.button("Load from GitHub") and github_url:
+                load_from_github(github_url)
+                st.rerun()
         
         # Knowledge base status
         st.header("📊 Status")
         if st.session_state.pipeline:
             st.success("✅ Pipeline ready")
             
-            # Get collection stats
+            # Check for existing data
             try:
                 stats = st.session_state.pipeline.get_collection_stats()
-                st.metric("Total chunks", stats['total_chunks'])
-            except:
-                st.warning("No knowledge base loaded")
+                has_data = st.session_state.pipeline.has_existing_data()
+                
+                if has_data:
+                    st.metric("Total chunks", stats['total_chunks'])
+                    st.success("✅ Existing knowledge base found")
+                    
+                    # Option to use existing data
+                    if st.button("Use Existing Knowledge Base"):
+                        st.session_state.knowledge_base_loaded = True
+                        st.success("✅ Using existing knowledge base!")
+                        st.rerun()
+                    
+                    # Option to clear existing data
+                    if st.button("Clear Existing Data", type="secondary"):
+                        st.session_state.pipeline.clear_collection()
+                        st.session_state.knowledge_base_loaded = False
+                        st.success("✅ Database cleared!")
+                        st.rerun()
+                else:
+                    st.warning("No knowledge base loaded")
+            except Exception as e:
+                st.warning(f"Error checking database: {e}")
         else:
             st.warning("❌ Pipeline not initialized")
         
         if st.session_state.knowledge_base_loaded:
-            st.success("✅ Knowledge base loaded")
+            st.success("✅ Knowledge base active")
         else:
-            st.warning("❌ No knowledge base loaded")
+            st.warning("❌ No knowledge base active")
         
         # Clear chat history
         if st.button("Clear Chat History"):
@@ -386,12 +511,12 @@ def main():
         # Sample questions
         st.subheader("💡 Try these questions:")
         sample_questions = [
-            "What is machine learning?",
-            "Explain supervised learning",
-            "What are the types of data structures?",
-            "How is linear algebra used in ML?",
-            "What is PCA?",
-            "Tell me about stacks and queues"
+            "What is a bijective function?",
+            "Explain graph coloring in planar graphs",
+            "What are data structures covered in CIS1210?",
+            "How is linear algebra used in machine learning?",
+            "Tell me about computer vision techniques",
+            "What did you learn in CIS5190 about ML?"
         ]
         
         for q in sample_questions:

@@ -1,0 +1,25 @@
+{
+  "containers": {
+    "sean-gpt": {
+      "image": ":sean-gpt-latest.1",
+      "ports": {
+        "8501": "HTTP"
+      },
+      "environment": {
+        "OPENAI_API_KEY": "YOUR_OPENAI_API_KEY_HERE"
+      }
+    }
+  },
+  "publicEndpoint": {
+    "containerName": "sean-gpt",
+    "containerPort": 8501,
+    "healthCheck": {
+      "healthyThreshold": 2,
+      "unhealthyThreshold": 2,
+      "timeoutSeconds": 5,
+      "intervalSeconds": 30,
+      "path": "/",
+      "successCodes": "200-499"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  sean-gpt:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    ports:
+      - "8501:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+    volumes:
+      - ./backend/data:/app/backend/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "backend/health_check.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Webhook handler for real-time updates
+  webhook-handler:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    command: ["python", "backend/webhook_handler.py"]
+    ports:
+      - "5000:5000"
+    environment:
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+    volumes:
+      - ./backend/data:/app/backend/data
+    restart: unless-stopped
+    profiles: ["webhook"]  # Only runs when explicitly enabled

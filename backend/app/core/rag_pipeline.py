@@ -2,7 +2,6 @@ import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import chromadb
-from chromadb.config import Settings
 from langchain_openai import OpenAIEmbeddings, OpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
@@ -38,10 +37,9 @@ class RAGPipeline:
             chunk_overlap=chunk_overlap
         )
         
-        # Initialize ChromaDB
+        # Initialize ChromaDB with new client configuration
         self.client = chromadb.PersistentClient(
-            path=chroma_persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            path=chroma_persist_directory
         )
         
         # Create or get collection
@@ -81,14 +79,17 @@ Answer:"""
         # Split into chunks
         print(f"Splitting {len(documents)} documents into chunks...")
         chunks = self.text_splitter.split_documents(documents)
+        print(f"✅ Split complete! Created {len(chunks)} chunks total")
         
         # Convert to format for ChromaDB
-        print(f"Processing {len(chunks)} chunks...")
+        print(f"Processing {len(chunks)} chunks for embedding...")
         texts = []
         metadatas = []
         ids = []
         
         for i, chunk in enumerate(chunks):
+            if i % 100 == 0:  # Progress every 100 chunks
+                print(f"  Prepared {i}/{len(chunks)} chunks for embedding...")
             texts.append(chunk.content)
             metadatas.append({
                 "source_file": chunk.source_file,
@@ -100,30 +101,80 @@ Answer:"""
                 "created_date": chunk.metadata.get("created_date", ""),
                 "modified_date": chunk.metadata.get("modified_date", "")
             })
-            ids.append(f"{chunk.source_file}_{chunk.chunk_index}")
+            # Create globally unique ID using file path and global chunk index
+            import hashlib
+            unique_id = f"chunk_{i}_{hashlib.md5(chunk.source_file.encode()).hexdigest()[:8]}"
+            ids.append(unique_id)
         
-        # Generate embeddings and store
-        print("Generating embeddings and storing in ChromaDB...")
-        embeddings = self.embeddings.embed_documents(texts)
-        
-        # Clear existing collection if it has data
+        # Clear existing collection if it has data first
         try:
-            if self.collection.count() > 0:
+            existing_count = self.collection.count()
+            if existing_count > 0:
+                print(f"⚠️ Clearing {existing_count} existing chunks from database...")
                 # Delete all documents by getting all IDs first
                 all_data = self.collection.get()
                 if all_data['ids']:
                     self.collection.delete(ids=all_data['ids'])
+                    print("✅ Database cleared")
         except Exception as e:
             print(f"Warning: Could not clear collection: {e}")
             # Continue anyway
         
-        # Add to ChromaDB
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids
-        )
+        # Check for duplicate IDs before processing
+        unique_ids = set(ids)
+        if len(unique_ids) != len(ids):
+            print(f"⚠️ Found {len(ids) - len(unique_ids)} duplicate IDs, regenerating...")
+            # Regenerate all IDs to ensure uniqueness
+            ids = [f"chunk_{i}" for i in range(len(texts))]
+            print(f"✅ Generated {len(ids)} unique IDs")
+        
+        # Process embeddings and storage in smaller batches since storage is the bottleneck
+        batch_size = 25  # Even smaller batches since ChromaDB storage is slow
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        
+        print(f"🔄 Processing {len(texts)} chunks in {total_batches} batches of {batch_size}...")
+        print("⏱️ Estimated time: 3-5 minutes for large repositories")
+        
+        for i in range(0, len(texts), batch_size):
+            batch_end = min(i + batch_size, len(texts))
+            batch_num = i // batch_size + 1
+            
+            print(f"📦 Batch {batch_num}/{total_batches}: Processing chunks {i+1}-{batch_end}")
+            
+            # Get batch data
+            batch_texts = texts[i:batch_end]
+            batch_metadatas = metadatas[i:batch_end]
+            batch_ids = ids[i:batch_end]
+            
+            # Generate embeddings for this batch
+            print(f"  🔄 Generating embeddings for batch {batch_num}...")
+            batch_embeddings = self.embeddings.embed_documents(batch_texts)
+            
+            # Add to ChromaDB with detailed timing
+            import time
+            print(f"  💾 Storing batch {batch_num} in database...")
+            start_time = time.time()
+            
+            try:
+                self.collection.add(
+                    documents=batch_texts,
+                    embeddings=batch_embeddings,
+                    metadatas=batch_metadatas,
+                    ids=batch_ids
+                )
+                storage_time = time.time() - start_time
+                print(f"  ✅ Batch {batch_num} stored in {storage_time:.1f}s!")
+                
+                # Show running total
+                current_total = self.collection.count()
+                print(f"  📊 Total chunks in database: {current_total}")
+                
+            except Exception as e:
+                print(f"  ❌ Error storing batch {batch_num}: {e}")
+                print(f"  📝 Batch details: {len(batch_texts)} texts, {len(batch_embeddings)} embeddings")
+                raise
+        
+        print("🎉 All embeddings generated and stored successfully!")
         
         return {
             "documents_processed": len(documents),
@@ -222,6 +273,25 @@ Content: {content}
             "collection_name": self.collection.name,
             "persist_directory": self.chroma_persist_directory
         }
+    
+    def has_existing_data(self) -> bool:
+        """Check if ChromaDB already contains data"""
+        try:
+            count = self.collection.count()
+            return count > 0
+        except:
+            return False
+    
+    def clear_collection(self):
+        """Clear all data from the collection"""
+        try:
+            # Get all ids and delete them
+            results = self.collection.get()
+            if results['ids']:
+                self.collection.delete(ids=results['ids'])
+                print(f"✅ Cleared {len(results['ids'])} existing chunks from database")
+        except Exception as e:
+            print(f"Error clearing collection: {e}")
 
 # Example usage
 if __name__ == "__main__":

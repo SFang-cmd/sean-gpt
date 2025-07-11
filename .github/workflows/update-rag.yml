@@ -1,0 +1,42 @@
+name: Update RAG Knowledge Base
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.md'  # Only trigger on markdown file changes
+
+jobs:
+  update-knowledge-base:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger RAG Pipeline Update
+        env:
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          APP_WEBHOOK_URL: ${{ secrets.APP_WEBHOOK_URL }}
+        run: |
+          # Create a JSON payload similar to GitHub's push webhook
+          PAYLOAD=$(cat <<EOF
+          {
+            "ref": "refs/heads/main",
+            "repository": {
+              "clone_url": "https://github.com/SFang-cmd/obiKnowledge.git",
+              "name": "obiKnowledge",
+              "full_name": "SFang-cmd/obiKnowledge"
+            },
+            "pusher": {
+              "name": "github-actions"
+            }
+          }
+          EOF
+          )
+
+          # Calculate HMAC signature (similar to GitHub's X-Hub-Signature)
+          SIGNATURE=$(echo -n "$PAYLOAD" | openssl sha1 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
+          
+          # Send POST request to your webhook endpoint
+          curl -X POST "$APP_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature: sha1=$SIGNATURE" \
+            -H "X-GitHub-Event: push" \
+            -d "$PAYLOAD"

@@ -1,0 +1,49 @@
+service: seangpt-webhook
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: us-east-1
+  timeout: 300  # 5 minutes max execution
+  memorySize: 512  # Increased for processing large repositories
+  environment:
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    GITHUB_WEBHOOK_SECRET: ${env:GITHUB_WEBHOOK_SECRET}
+    CHROMA_API_KEY: ${env:CHROMA_API_KEY, ''}
+    CHROMA_TENANT: ${env:CHROMA_TENANT, ''}
+    CHROMA_DATABASE: ${env:CHROMA_DATABASE, ''}
+    DEPLOYMENT_ENV: 'production'
+    DEFAULT_REPO_URL: 'https://github.com/SFang-cmd/obiKnowledge'
+
+functions:
+  webhook:
+    handler: backend.app.services.webhook_handler.lambda_handler
+    events:
+      - httpApi:
+          path: /webhook
+          method: post
+    environment:
+      REPO_PATH: /tmp/knowledge-repo  # Use /tmp in Lambda for writable storage
+
+package:
+  patterns:
+    - '!node_modules/**'
+    - '!frontend/**'
+    - '!**/__pycache__/**'
+    - '!.env*'
+    - '!.git/**'
+    - '!.github/**'
+    - '!data/**'
+    - '!tests/**'
+    - '!**/*.pyc'
+    - 'backend/**'
+    - 'requirements.txt'
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true  # Use Docker for installing packages with compiled dependencies

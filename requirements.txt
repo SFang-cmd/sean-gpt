@@ -1,0 +1,16 @@
+chromadb
+fastapi
+boto3==1.39.3
+gitpython
+langchain
+langchain-community
+langchain-openai
+markdown
+openai
+pydantic
+PyYAML
+python-dotenv
+requests
+streamlit
+tiktoken
+uvicorn
